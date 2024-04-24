@@ -6,6 +6,10 @@ from langchain.chat_models import ChatOpenAI
 from knowledge_gpt.core.debug import FakeChatModel
 from langchain.chat_models.base import BaseChatModel
 
+from vertexai.generative_models import GenerativeModel, ChatSession
+import vertexai
+from vertexai import generative_models
+
 
 def pop_docs_upto_limit(
     query: str, chain: StuffDocumentsChain, docs: List[Document], max_len: int
@@ -22,11 +26,23 @@ def pop_docs_upto_limit(
     return docs
 
 
-def get_llm(model: str, **kwargs) -> BaseChatModel:
-    if model == "debug":
-        return FakeChatModel()
+def get_llm(model: str,project_id: str, **kwargs) -> BaseChatModel:
+    # if model == "debug":
+    #     return FakeChatModel()
 
-    if "gpt" in model:
-        return ChatOpenAI(model=model, **kwargs)  # type: ignore
+    if model:
+        project_id = "PROJECT_ID"
+        location = "us-central1"
+        vertexai.init(project=project_id, location=location)
+        model = GenerativeModel(model_name=model)
+        chat = model.start_chat()
+        return chat
+    else:
+        raise NotImplementedError(f"Model {model} not supported!")
 
-    raise NotImplementedError(f"Model {model} not supported!")
+def generate_answer(chat: ChatSession, context:str, query=query, chat_llmllm=chat_llm):
+    text_response = []
+    responses = chat.send_message(prompt, stream=True)
+    for chunk in responses:
+        text_response.append(chunk.text)
+    return "".join(text_response)

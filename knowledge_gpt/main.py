@@ -17,37 +17,41 @@ from knowledge_gpt.core.chunking import chunk_file
 from knowledge_gpt.core.embedding import embed_files
 from knowledge_gpt.core.qa import query_folder
 from knowledge_gpt.core.utils import get_llm
+from knowledge_gpt.core.utils import generate_answer
 
+from pathlib import Path
+from vertexai import generative_models
+from vertexai.generative_models import GenerativeModel
 
 EMBEDDING = "openai"
 VECTOR_STORE = "faiss"
-MODEL_LIST = ["gpt-3.5-turbo", "gpt-4"]
+MODEL_LIST = ["gemini-1.0-pro-vision"]
 
 # Uncomment to enable debug mode
 # MODEL_LIST.insert(0, "debug")
 
-st.set_page_config(page_title="KnowledgeGPT", page_icon="📖", layout="wide")
-st.header("📖KnowledgeGPT")
+st.set_page_config(page_title="Maxima Patient Assist", page_icon="👩🏼‍🔬", layout="wide")
+st.header("👩🏼‍🔬Maxima Patient Assist")
 
 # Enable caching for expensive functions
 bootstrap_caching()
 
-sidebar()
+# sidebar()
 
-openai_api_key = st.session_state.get("OPENAI_API_KEY")
+# openai_api_key = st.session_state.get("OPENAI_API_KEY")
 
 
-if not openai_api_key:
-    st.warning(
-        "Enter your OpenAI API key in the sidebar. You can get a key at"
-        " https://platform.openai.com/account/api-keys."
-    )
+# if not openai_api_key:
+#     st.warning(
+#         "Enter your OpenAI API key in the sidebar. You can get a key at"
+#         " https://platform.openai.com/account/api-keys."
+#     )
 
 
 uploaded_file = st.file_uploader(
     "Upload a pdf, docx, or txt file",
-    type=["pdf", "docx", "txt"],
-    help="Scanned documents are not supported yet!",
+    type=["pdf", "docx", "txt", "jpg", "png"],
+    help="Scanned documents are not supported yet!\n PLease enter one of "pdf", "docx", "txt", "jpg", "png"",
 )
 
 model: str = st.selectbox("Model", options=MODEL_LIST)  # type: ignore
@@ -60,28 +64,46 @@ with st.expander("Advanced Options"):
 if not uploaded_file:
     st.stop()
 
-try:
-    file = read_file(uploaded_file)
-except Exception as e:
-    display_file_read_error(e, file_name=uploaded_file.name)
 
-chunked_file = chunk_file(file, chunk_size=300, chunk_overlap=0)
+# Read uploaded image
+if Path(uploaded_file.name).suffix == "jpg" or Path(uploaded_file.name).suffix == "png":
+    try:
+        image = generative_models.Part.from_uri(Path(uploaded_file.name), mime_type="image/jpeg")
+    except Exception as e:
+        print("Error in reading uploaded image")
+        print(e)
+
+# Read uploaded document
+if Path(uploaded_file.name).suffix in ["doc", "txt", "docx", "csv"]:
+    try:
+        file = read_file(uploaded_file)
+    except Exception as e:
+        display_file_read_error(e, file_name=uploaded_file.name)
+
+# not needed
+# chunked_file = chunk_file(file, chunk_size=300, chunk_overlap=0)
+
+with st.spinner("Reading document... This may take a while⏳"):
+    gemini_pro_vision_model = GenerativeModel(model)
+    file_data = gemini_pro_vision_model.generate_content(
+        ["Take a close look and Examine the image carefully. Generate a descriptive summary of the type of details like medicine names, schedules, dates, clinic name, phramacy name, patient details, etc", image])
+
 
 if not is_file_valid(file):
     st.stop()
 
 
-if not is_open_ai_key_valid(openai_api_key, model):
-    st.stop()
+# if not is_open_ai_key_valid(openai_api_key, model):
+#     st.stop()
 
 
-with st.spinner("Indexing document... This may take a while⏳"):
-    folder_index = embed_files(
-        files=[chunked_file],
-        embedding=EMBEDDING if model != "debug" else "debug",
-        vector_store=VECTOR_STORE if model != "debug" else "debug",
-        openai_api_key=openai_api_key,
-    )
+
+    # folder_index = embed_files(
+    #     files=[chunked_file],
+    #     embedding=EMBEDDING if model != "debug" else "debug",
+    #     vector_store=VECTOR_STORE if model != "debug" else "debug",
+    #     openai_api_key=openai_api_key,
+    # )
 
 with st.form(key="qa_form"):
     query = st.text_area("Ask a question about the document")
@@ -99,23 +121,18 @@ if submit:
         st.stop()
 
     # Output Columns
-    answer_col, sources_col = st.columns(2)
+    answer_col = st.columns(1)
 
-    llm = get_llm(model=model, openai_api_key=openai_api_key, temperature=0)
-    result = query_folder(
-        folder_index=folder_index,
-        query=query,
-        return_all=return_all_chunks,
-        llm=llm,
-    )
+    chat_llm = get_llm(model=model, project_id="q-gcp-00109-pm-hackathon-24-04", temperature=0)
+    result = generate_answer(context=file_data, query=query, chat_llm=chat_llm)
 
     with answer_col:
         st.markdown("#### Answer")
         st.markdown(result.answer)
 
-    with sources_col:
-        st.markdown("#### Sources")
-        for source in result.sources:
-            st.markdown(source.page_content)
-            st.markdown(source.metadata["source"])
-            st.markdown("---")
+    # with sources_col:
+    #     st.markdown("#### Sources")
+    #     for source in result.sources:
+    #         st.markdown(source.page_content)
+    #         st.markdown(source.metadata["source"])
+    #         st.markdown("---")
